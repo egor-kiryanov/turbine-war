@@ -8,6 +8,10 @@ import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.params.BasicHttpParams;
+import org.apache.http.params.HttpConnectionParamBean;
+import org.apache.http.params.HttpConnectionParams;
+import org.apache.http.params.HttpParams;
 import org.apache.http.util.EntityUtils;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
@@ -52,12 +56,22 @@ public class ZooKeeperNerveInstanceDiscovery implements InstanceDiscovery, Watch
     private final static DynamicStringProperty protocol = DynamicPropertyFactory
             .getInstance().getStringProperty("health.protocol", "http");
     
+    private final static DynamicIntProperty connectionTimeout = DynamicPropertyFactory
+            .getInstance().getIntProperty("heath.connectionTimeout", 500);
+    
+    private final static DynamicIntProperty readTimeout = DynamicPropertyFactory
+            .getInstance().getIntProperty("heath.readTimeout", 1000);
+    
     private final static ObjectMapper om = new ObjectMapper();
 
     private final HttpClient httpClient;
     
     public ZooKeeperNerveInstanceDiscovery() {
-        this.httpClient = new DefaultHttpClient();
+        HttpParams params = new BasicHttpParams();
+        HttpConnectionParams.setConnectionTimeout(params, connectionTimeout.get());
+        HttpConnectionParams.setSoTimeout(params, readTimeout.get());
+        
+        this.httpClient = new DefaultHttpClient(params);
     }
     
     @Override
@@ -118,7 +132,7 @@ public class ZooKeeperNerveInstanceDiscovery implements InstanceDiscovery, Watch
                 protocol.get(),
                 service.getHost(),
                 service.getPort(),
-                healthPath.get().endsWith("/") ? healthPath.get() : "/" + healthPath.get()));
+                healthPath.get().startsWith("/") ? healthPath.get() : "/" + healthPath.get()));
         
         log.debug("checking if service {} supports hystrix at health url {}", service, get.getURI());
         try {
