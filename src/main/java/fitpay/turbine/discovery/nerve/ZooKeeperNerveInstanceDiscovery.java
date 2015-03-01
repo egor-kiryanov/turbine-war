@@ -3,8 +3,12 @@ package fitpay.turbine.discovery.nerve;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.util.EntityUtils;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.ZooKeeper;
@@ -18,19 +22,44 @@ import com.netflix.config.DynamicStringProperty;
 import com.netflix.turbine.discovery.Instance;
 import com.netflix.turbine.discovery.InstanceDiscovery;
 
+import fitpay.turbine.model.Health;
+import fitpay.turbine.model.Service;
+
 public class ZooKeeperNerveInstanceDiscovery implements InstanceDiscovery, Watcher {
-    private static Logger log = LoggerFactory.getLogger(ZooKeeperNerveInstanceDiscovery.class);
+    private static Logger log = LoggerFactory
+            .getLogger(ZooKeeperNerveInstanceDiscovery.class);
 
-    private final static DynamicStringProperty zkHosts = DynamicPropertyFactory.getInstance().getStringProperty("turbine.ZkDiscovery.zkHosts", null);
-    private final static DynamicIntProperty timeout = DynamicPropertyFactory.getInstance().getIntProperty("turbine.ZkDiscovery.timeout", 3000);
+    private final static DynamicStringProperty zkHosts = DynamicPropertyFactory
+            .getInstance().getStringProperty("turbine.ZkDiscovery.zkHosts",
+                    null);
+    private final static DynamicIntProperty timeout = DynamicPropertyFactory
+            .getInstance().getIntProperty("turbine.ZkDiscovery.timeout", 3000);
 
-    private final static DynamicStringProperty rootServicePath = DynamicPropertyFactory.getInstance().getStringProperty("turbine.ZkDiscovery.rootServicePath", "/nerve/services");
-    private final static DynamicStringProperty servicesSuffixPath = DynamicPropertyFactory.getInstance().getStringProperty("turbine.ZkDiscovery.servicesSuffixPath", "services");
+    private final static DynamicStringProperty rootServicePath = DynamicPropertyFactory
+            .getInstance().getStringProperty(
+                    "turbine.ZkDiscovery.rootServicePath", "/nerve/services");
+    private final static DynamicStringProperty servicesSuffixPath = DynamicPropertyFactory
+            .getInstance().getStringProperty(
+                    "turbine.ZkDiscovery.servicesSuffixPath", "services");
 
-    private final static DynamicStringProperty clusterName = DynamicPropertyFactory.getInstance().getStringProperty("turbine.ZkDiscovery.clusterName", "Default");
+    private final static DynamicStringProperty clusterName = DynamicPropertyFactory
+            .getInstance().getStringProperty("turbine.ZkDiscovery.clusterName",
+                    "Default");
 
+    private final static DynamicStringProperty healthPath = DynamicPropertyFactory
+            .getInstance().getStringProperty("health.path", "/health");
+
+    private final static DynamicStringProperty protocol = DynamicPropertyFactory
+            .getInstance().getStringProperty("health.protocol", "http");
+    
     private final static ObjectMapper om = new ObjectMapper();
 
+    private final HttpClient httpClient;
+    
+    public ZooKeeperNerveInstanceDiscovery() {
+        this.httpClient = new DefaultHttpClient();
+    }
+    
     @Override
     public Collection<Instance> getInstanceList() throws Exception {
         Collection<Instance> instances = new ArrayList<Instance>();
@@ -40,7 +69,8 @@ public class ZooKeeperNerveInstanceDiscovery implements InstanceDiscovery, Watch
         try {
             zk = new ZooKeeper(zkHosts.getValue(), timeout.getValue(), this);
 
-            for (String serviceName : zk.getChildren(rootServicePath.getValue(), false)) {
+            for (String serviceName : zk.getChildren(
+                    rootServicePath.getValue(), false)) {
                 log.debug("discovering instances for service: {}", serviceName);
                 instances.addAll(getServiceInstances(zk, serviceName));
             }
@@ -55,9 +85,11 @@ public class ZooKeeperNerveInstanceDiscovery implements InstanceDiscovery, Watch
         return instances;
     }
 
-    private List<Instance> getServiceInstances(ZooKeeper zk, String serviceName) throws Exception {
+    private List<Instance> getServiceInstances(ZooKeeper zk, String serviceName)
+            throws Exception {
         String cn = clusterName.getValue();
-        String path = rootServicePath.getValue() + "/" + serviceName + "/" + servicesSuffixPath.getValue();
+        String path = rootServicePath.getValue() + "/" + serviceName + "/"
+                + servicesSuffixPath.getValue();
 
         List<Instance> instances = new ArrayList<Instance>();
 
@@ -70,12 +102,38 @@ public class ZooKeeperNerveInstanceDiscovery implements InstanceDiscovery, Watch
             String json = new String(b);
             log.debug("zk data for [{}]: {}", nodePath, json);
 
-            @SuppressWarnings("unchecked")
-			Map<String, String> m = om.readValue(json, Map.class);
-            instances.add(new Instance(m.get("host") + ":" + m.get("port"), cn, true));
+            Service serviceInstance = om.readValue(json, Service.class);
+
+            if (isValidHystrixInstance(serviceInstance)) {
+                instances.add(new Instance(serviceInstance.getHost() + ":"
+                        + serviceInstance.getPort(), cn, true));
+            }
         }
 
         return instances;
+    }
+
+    private boolean isValidHystrixInstance(Service service) {
+        HttpGet get = new HttpGet(String.format("%s://%s:%s%s",
+                protocol.get(),
+                service.getHost(),
+                service.getPort(),
+                healthPath.get().endsWith("/") ? healthPath.get() : "/" + healthPath.get()));
+        
+        log.debug("checking if service {} supports hystrix at health url {}", service, get.getURI());
+        try {
+            HttpResponse response = httpClient.execute(get);
+            if (response.getStatusLine().getStatusCode() == 200) {
+                Health health = om.readValue(EntityUtils.toString(response.getEntity()), Health.class);
+                return health.isHystrix();
+            } else {
+                log.warn("service {} health check failed: {}", response);
+            }
+        } catch (Exception e) {
+            log.warn("error getting health data from service {} using url {}", service, get.getURI(), e);
+        }
+        
+        return false;
     }
 
     @Override
