@@ -141,8 +141,10 @@ public class ZooKeeperNerveInstanceDiscovery implements InstanceDiscovery, Watch
             if (response.getStatusLine().getStatusCode() == 200) {
                 Health health = om.readValue(json, Health.class);
                 return health.isHystrix();
+            } else if (response.getStatusLine().getStatusCode() == 404) {
+                log.debug("service {} does not have a health endpoint: {}", service, response);
             } else {
-                log.warn("service {} health check failed: {}", response);
+                log.warn("service {} health check failed: {}", service, response);
             }
         } catch (Exception e) {
             log.warn("error getting health data from service {} using url {}", service, get.getURI(), e);
