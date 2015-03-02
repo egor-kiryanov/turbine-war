@@ -136,10 +136,10 @@ public class ZooKeeperNerveInstanceDiscovery implements InstanceDiscovery, Watch
         log.debug("checking if service {} supports hystrix at health url {}", service, get.getURI());
         try {
             HttpResponse response = httpClient.execute(get);
-            EntityUtils.consume(response.getEntity());
+            String json = EntityUtils.toString(response.getEntity());
             
             if (response.getStatusLine().getStatusCode() == 200) {
-                Health health = om.readValue(response.getEntity().getContent(), Health.class);
+                Health health = om.readValue(json, Health.class);
                 return health.isHystrix();
             } else {
                 log.warn("service {} health check failed: {}", response);
