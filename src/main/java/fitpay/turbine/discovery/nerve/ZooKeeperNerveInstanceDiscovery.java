@@ -9,7 +9,6 @@ import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.params.BasicHttpParams;
-import org.apache.http.params.HttpConnectionParamBean;
 import org.apache.http.params.HttpConnectionParams;
 import org.apache.http.params.HttpParams;
 import org.apache.http.util.EntityUtils;
@@ -137,8 +136,10 @@ public class ZooKeeperNerveInstanceDiscovery implements InstanceDiscovery, Watch
         log.debug("checking if service {} supports hystrix at health url {}", service, get.getURI());
         try {
             HttpResponse response = httpClient.execute(get);
+            EntityUtils.consume(response.getEntity());
+            
             if (response.getStatusLine().getStatusCode() == 200) {
-                Health health = om.readValue(EntityUtils.toString(response.getEntity()), Health.class);
+                Health health = om.readValue(response.getEntity().getContent(), Health.class);
                 return health.isHystrix();
             } else {
                 log.warn("service {} health check failed: {}", response);
@@ -147,6 +148,7 @@ public class ZooKeeperNerveInstanceDiscovery implements InstanceDiscovery, Watch
             log.warn("error getting health data from service {} using url {}", service, get.getURI(), e);
         }
         
+       
         return false;
     }
 
